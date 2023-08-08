@@ -1,0 +1,70 @@
+#!/bin/bash
+
+# Чтение списка IP-адресов из файла
+
+ip_file="ip_list.txt"
+ip_list=()
+while IFS= read -r line; do
+    ip_list+=("$line")
+done < "$ip_file"
+
+# Создание массива для хранения соответствия IP и Hostname
+declare -A hostnames
+
+# Определение пути к файлу для сохранения результатов
+output_file="results.txt"
+
+# Перебор списка IP-адресов и выполнение команд для каждого адреса
+for ip in "${ip_list[@]}"; do
+    echo "IP-адрес: $ip"
+
+    # Получение IP-адреса и имени хоста с удаленного сервера
+    remote_ip=$(ssh -o BatchMode=yes root@$ip "ip a | awk '/inet / && !/127/ {split(\$2, a, \"/\"); print a[1]}' | head -n 1")
+    hostname_rem=$(ssh -o BatchMode=yes root@$ip "hostname")
+
+    # Проверка установки агента Zabbix
+    if ssh -o BatchMode=yes root@$ip dpkg -s zabbix-agent >/dev/null 2>&1; then
+        # Если установлен старый агент Zabbix, устанавливаем новый агент Zabbix 6.2
+        echo "Старый агент Zabbix установлен, устанавливаю новый агент Zabbix 6.2"
+        ssh -o BatchMode=yes root@$ip "apt install -y zabbix-agent"
+    else
+        # Если агент Zabbix не установлен, устанавливаем новый агент Zabbix 6.2
+        echo "Агент Zabbix не установлен, устанавливаю новый агент Zabbix 6.2"
+        ssh -o BatchMode=yes root@$ip "wget https://repo.zabbix.com/zabbix/6.2/debian/pool/main/z/zabbix-release/zabbix-release_6.2-1+debian11_all.deb -O /tmp/zabbix-release.deb"
+        ssh -o BatchMode=yes root@$ip "dpkg -i /tmp/zabbix-release.deb"
+        ssh -o BatchMode=yes root@$ip "apt update"
+        ssh -o BatchMode=yes root@$ip "apt install -y zabbix-agent"
+    fi
+
+    # Обновление конфигурационного файла агента Zabbix с использованием полученных данных
+    ssh -o BatchMode=yes root@$ip "echo 'PidFile=/run/zabbix/zabbix_agent2.pid
+LogFile=/var/log/zabbix/zabbix_agent2.log
+LogFileSize=100
+Server=zabbix.dc.rk, 172.19.0.140, 172.19.0.254
+ListenPort=10050
+ListenIP=$remote_ip
+ServerActive=172.19.0.140, zabbix.dc.rk
+Hostname=$hostname_rem
+Timeout=7
+Include=/etc/zabbix/zabbix_agent2.d/*.conf
+RefreshActiveChecks=120
+DebugLevel=3
+BufferSize=100
+BufferSend=5' > /etc/zabbix/zabbix_agent2.conf"
+
+    echo "Конфигурационный файл агента Zabbix обновлен на сервере $ip"
+
+    # Получение значения Hostname из конфигурации агента Zabbix
+    hostname=$(ssh -o BatchMode=yes root@$ip "grep '^Hostname=' /etc/zabbix/zabbix_agent2.conf | cut -d '=' -f2")
+    if [ "$hostname" == "Zabbix server" ]; then
+        hostname="error"
+    fi
+
+    if [ -n "$hostname" ]; then
+        echo "$ip --- $hostname" >> "$output_file"
+    else
+        echo "$ip --- error" >> "$output_file"
+    fi
+
+    echo
+done
