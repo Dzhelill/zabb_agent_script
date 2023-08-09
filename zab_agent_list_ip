@@ -1,4 +1,8 @@
 #!/bin/bash
+#Параметры сервера(изменить)
+
+server="указать адрес вашего zabbix-server"
+server_act="указать адрес вашего ServerActive (обычно тот же адрес что и сервер)"
 
 # Чтение списка IP-адресов из файла
 
@@ -40,10 +44,10 @@ for ip in "${ip_list[@]}"; do
     ssh -o BatchMode=yes root@$ip "echo 'PidFile=/run/zabbix/zabbix_agent2.pid
 LogFile=/var/log/zabbix/zabbix_agent2.log
 LogFileSize=100
-Server=zabbix.dc.rk, 172.19.0.140, 172.19.0.254
+Server=$server
 ListenPort=10050
 ListenIP=$remote_ip
-ServerActive=172.19.0.140, zabbix.dc.rk
+ServerActive=$server_act
 Hostname=$hostname_rem
 Timeout=7
 Include=/etc/zabbix/zabbix_agent2.d/*.conf
